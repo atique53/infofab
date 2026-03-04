@@ -128,6 +128,7 @@ export default function App() {
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
   
   // Theme-aware styles
   const inputBg = theme === 'dark' ? 'bg-slate-800' : 'bg-slate-100';
@@ -194,15 +195,19 @@ export default function App() {
   useEffect(() => {
     const loadData = async () => {
       try {
+        console.log('Fetching data from server...');
         const response = await fetch('/api/data');
         if (response.ok) {
           const data = await response.json();
+          console.log('Data loaded from server:', data);
           if (data.transactions) setTransactions(data.transactions);
           if (data.manager) setManager(data.manager);
           if (data.notes) setNotes(data.notes);
+        } else {
+          throw new Error('Server response not ok');
         }
       } catch (error) {
-        console.error('Failed to load data:', error);
+        console.error('Failed to load data from server, trying localStorage:', error);
         // Fallback to localStorage if server fails
         const savedData = localStorage.getItem('inventory_billing_data');
         const savedManager = localStorage.getItem('inventory_billing_manager');
@@ -210,30 +215,54 @@ export default function App() {
         if (savedData) setTransactions(JSON.parse(savedData));
         if (savedManager) setManager(JSON.parse(savedManager));
         if (savedNotes) setNotes(JSON.parse(savedNotes));
+      } finally {
+        setIsDataLoaded(true);
       }
     };
     loadData();
   }, []);
 
+  // Auto-save whenever data changes, but only after initial load
+  useEffect(() => {
+    if (isDataLoaded) {
+      const timer = setTimeout(() => {
+        saveData(transactions, manager, notes);
+      }, 2000); // Debounce save to 2 seconds
+      return () => clearTimeout(timer);
+    }
+  }, [transactions, manager, notes, isDataLoaded]);
+
   // Save data to server
   const saveData = async (currentTransactions: Transaction[], currentManager: Manager, currentNotes?: Note[]) => {
+    if (!isDataLoaded) return; // Prevent saving before loading
+    
     setIsSaving(true);
     try {
-      await fetch('/api/data', {
+      const payload = { 
+        transactions: currentTransactions, 
+        manager: currentManager,
+        notes: currentNotes || notes
+      };
+      
+      const response = await fetch('/api/data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          transactions: currentTransactions, 
-          manager: currentManager,
-          notes: currentNotes || notes
-        }),
+        body: JSON.stringify(payload),
       });
+
+      if (!response.ok) throw new Error('Failed to save to server');
+
       // Also save to localStorage as backup
       localStorage.setItem('inventory_billing_data', JSON.stringify(currentTransactions));
       localStorage.setItem('inventory_billing_manager', JSON.stringify(currentManager));
       localStorage.setItem('inventory_billing_notes', JSON.stringify(currentNotes || notes));
+      console.log('Data saved successfully');
     } catch (error) {
       console.error('Failed to save data:', error);
+      // Still save to localStorage even if server fails
+      localStorage.setItem('inventory_billing_data', JSON.stringify(currentTransactions));
+      localStorage.setItem('inventory_billing_manager', JSON.stringify(currentManager));
+      localStorage.setItem('inventory_billing_notes', JSON.stringify(currentNotes || notes));
     } finally {
       setIsSaving(false);
     }
