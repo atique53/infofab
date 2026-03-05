@@ -19,7 +19,12 @@ async function startServer() {
     try {
       if (!fs.existsSync(DATA_FILE)) {
         console.log('Data file not found, creating initial state');
-        const initialState = { transactions: [], manager: { name: 'Manager Name', photo: null }, notes: [] };
+        const initialState = { 
+          transactions: [], 
+          manager: { name: 'Manager Name', photo: null }, 
+          notes: [],
+          runningPrograms: {} 
+        };
         fs.writeFileSync(DATA_FILE, JSON.stringify(initialState, null, 2));
         return res.json(initialState);
       }
