@@ -143,6 +143,7 @@ export default function App() {
   const [filterEndDate, setFilterEndDate] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'receive' | 'delivery' | 'bill'>('all');
   const [filterPkgType, setFilterPkgType] = useState<'all' | 'Package' | 'Non-Package'>('all');
+  const [filterMonth, setFilterMonth] = useState<string>('all');
   
   // Form State
   const [formData, setFormData] = useState<FormData>({
@@ -231,6 +232,17 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [transactions, manager, notes, isDataLoaded]);
+
+  // Auto-generate Challan Reference
+  useEffect(() => {
+    if (!editingId && (formData.type === 'receive' || formData.type === 'delivery')) {
+      const qty = formData.type === 'receive' ? formData.amount : formData.orderQty;
+      if (formData.fabricName && qty) {
+        const autoRef = `${formData.fabricName}_${qty}`;
+        setFormData(prev => ({ ...prev, challan: autoRef }));
+      }
+    }
+  }, [formData.fabricName, formData.amount, formData.orderQty, formData.type, editingId]);
 
   // Save data to server
   const saveData = async (currentTransactions: Transaction[], currentManager: Manager, currentNotes?: Note[]) => {
@@ -489,9 +501,22 @@ export default function App() {
     const matchesEndDate = !filterEndDate || t.date <= filterEndDate;
     const matchesType = filterType === 'all' || t.type === filterType;
     const matchesPkgType = filterPkgType === 'all' || t.pkgType === filterPkgType;
+    
+    const tDate = new Date(t.date);
+    const tMonth = tDate.toLocaleString('en-US', { month: 'long' });
+    const matchesMonth = filterMonth === 'all' || tMonth === filterMonth;
 
-    return matchesSearch && matchesStartDate && matchesEndDate && matchesType && matchesPkgType;
+    return matchesSearch && matchesStartDate && matchesEndDate && matchesType && matchesPkgType && matchesMonth;
   });
+
+  const filteredStats = filteredTransactions.reduce((acc, t) => {
+    acc.received += (Number(t.receiveQty) || 0);
+    acc.ordered += (Number(t.orderQty) || 0);
+    acc.actualDelivered += (Number(t.delvA) || 0) + (Number(t.delvB) || 0);
+    acc.bill += (Number(t.bill) || 0);
+    acc.paid += (Number(t.paid) || 0);
+    return acc;
+  }, { received: 0, ordered: 0, actualDelivered: 0, bill: 0, paid: 0 });
 
   const buyerBalances = transactions.reduce((acc, t) => {
     const bill = Number(t.bill) || 0;
@@ -541,9 +566,10 @@ export default function App() {
     const summary = buyerTransactions.reduce((acc, t) => ({
       received: acc.received + t.receiveQty,
       ordered: acc.ordered + t.orderQty,
+      actualDelivered: acc.actualDelivered + (t.delvA + t.delvB),
       bill: acc.bill + t.bill,
       paid: acc.paid + t.paid,
-    }), { received: 0, ordered: 0, bill: 0, paid: 0 });
+    }), { received: 0, ordered: 0, actualDelivered: 0, bill: 0, paid: 0 });
     
     return { transactions: buyerTransactions, summary };
   };
@@ -958,12 +984,13 @@ export default function App() {
 
       {/* Main Content */}
       <main className={cn(
-        "flex-1 p-6 lg:p-10 overflow-y-auto max-h-screen custom-scrollbar transition-colors duration-500",
+        "flex-1 p-6 lg:p-10 overflow-y-auto max-h-screen custom-scrollbar transition-colors duration-500 relative",
         theme === 'dark' 
           ? "bg-gradient-to-br from-[#020617] via-[#020617] to-indigo-950/20" 
           : "bg-slate-50"
       )}>
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10 print:hidden">
+        {/* Greeting - Not sticky */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-2 mb-6 print:hidden">
           <div className="flex items-center gap-4 w-full md:w-auto">
             <button 
               onClick={() => setIsSidebarOpen(true)}
@@ -972,34 +999,52 @@ export default function App() {
               <Menu className="w-6 h-6" />
             </button>
             <div>
-              <h2 className="text-xl font-medium tracking-tight text-slate-300">Assalamu Alaikom</h2>
-              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em] mt-1 flex items-center gap-2">
+              <h2 className="text-lg md:text-xl font-black tracking-tight text-white">Assalamu Alaikom</h2>
+              <p className="text-slate-500 text-[10px] md:text-[10px] font-bold uppercase tracking-[0.2em] mt-0.5 flex items-center gap-2">
                 <ShieldCheck className="w-3 h-3 text-indigo-500" />
                 Elite Dashboard • {manager.name}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1 bg-slate-900/50 p-1 rounded-xl border border-white/5">
-              <button 
-                onClick={() => setIsGlobalSearchOpen(true)}
-                className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all"
-                title="Global Search"
-              >
-                <Search className="w-4 h-4" />
-              </button>
-              <div className="w-px h-4 bg-white/10 mx-1" />
-              <button 
-                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all"
-                title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-              >
-                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-              </button>
-            </div>
-            <div className="glass-card px-4 py-2 rounded-xl flex items-center gap-3 border-white/5">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-xs font-bold text-slate-400">{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+        </div>
+
+        {/* Tools - Sticky at the very top */}
+        <div className={cn(
+          "sticky top-0 z-40 py-3 -mx-6 lg:-mx-10 px-6 lg:px-10 backdrop-blur-xl border-b transition-all shadow-2xl flex items-center justify-between md:justify-end gap-2 md:gap-3 mb-10 print:hidden",
+          theme === 'dark' ? "bg-[#020617]/90 border-white/10 shadow-indigo-500/5" : "bg-white/90 border-slate-200 shadow-slate-200/50"
+        )}>
+          <div className="flex items-center gap-1 bg-slate-900/50 p-1 rounded-xl border border-white/5">
+            <button 
+              onClick={() => {
+                const entrySection = document.getElementById('new-entry-section');
+                entrySection?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="p-2 text-indigo-400 hover:text-white hover:bg-indigo-500/20 rounded-lg transition-all"
+              title="New Entry"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+            <div className="w-px h-4 bg-white/10 mx-1" />
+            <button 
+              onClick={() => setIsGlobalSearchOpen(true)}
+              className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all"
+              title="Global Search"
+            >
+              <Search className="w-4 h-4" />
+            </button>
+            <div className="w-px h-4 bg-white/10 mx-1" />
+            <button 
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all"
+              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+          </div>
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="glass-card px-3 md:px-4 py-2 rounded-xl flex items-center gap-2 md:gap-3 border-white/5">
+              <div className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[10px] md:text-xs font-bold text-slate-400 whitespace-nowrap">{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
             </div>
             <button 
               onClick={() => {
@@ -1012,16 +1057,16 @@ export default function App() {
                 a.download = 'ledger_report.csv';
                 a.click();
               }}
-              className="bg-slate-800 hover:bg-slate-700 text-white p-2.5 rounded-xl border border-white/5 transition-all"
+              className="bg-slate-800 hover:bg-slate-700 text-white p-2 md:p-2.5 rounded-xl border border-white/5 transition-all"
               title="Export Full Ledger"
             >
-              <Download className="w-5 h-5" />
+              <Download className="w-4 h-4 md:w-5 md:h-5" />
             </button>
           </div>
-        </header>
+        </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 mb-10 print:hidden">
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-6 mb-10 print:hidden">
           <StatCard label="Total Received" value={`${stats.received.toLocaleString()}`} unit="Yds" icon={<ArrowDownCircle className="w-5 h-5" />} color="blue" theme={theme} />
           <StatCard label="Total Ordered" value={`${stats.ordered.toLocaleString()}`} unit="Yds" icon={<ArrowUpCircle className="w-5 h-5" />} color="rose" theme={theme} />
           <StatCard label="Current Stock" value={`${(stats.received - stats.ordered).toLocaleString()}`} unit="Yds" icon={<Package className="w-5 h-5" />} color="emerald" theme={theme} />
@@ -1036,8 +1081,8 @@ export default function App() {
                 <TrendingUp className="w-4 h-4 text-blue-400" />
               </div>
               <div>
-                <h3 className={cn("text-sm font-black uppercase tracking-widest", headingColor)}>Pending Grey Stock</h3>
-                <p className={cn("text-[10px] font-bold uppercase tracking-widest mt-0.5", mutedText)}>Fabric remaining for processing</p>
+                <h3 className={cn("text-base md:text-sm font-black uppercase tracking-widest", headingColor)}>Pending Grey Stock</h3>
+                <p className={cn("text-[8px] md:text-[10px] font-bold uppercase tracking-widest mt-0.5", mutedText)}>Fabric remaining for processing</p>
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -1084,7 +1129,7 @@ export default function App() {
               {/* Dues */}
               {Object.keys(buyerDues).length > 0 && (
                 <div>
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <h3 className="text-sm md:text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
                     <CreditCard className="w-4 h-4 text-rose-500" />
                     Outstanding Dues
                   </h3>
@@ -1111,7 +1156,7 @@ export default function App() {
               {/* Advances */}
               {Object.keys(buyerAdvances).length > 0 && (
                 <div>
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <h3 className="text-sm md:text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
                     <Banknote className="w-4 h-4 text-emerald-500" />
                     Advance Payments
                   </h3>
@@ -1146,8 +1191,8 @@ export default function App() {
                 <FileText className="w-5 h-5 text-emerald-400" />
               </div>
               <div>
-                <h3 className="text-lg font-bold">Buyer Statement</h3>
-                <p className="text-xs text-slate-500">View and export detailed history for a specific buyer</p>
+                <h3 className="text-xl md:text-lg font-bold">Buyer Statement</h3>
+                <p className="text-[10px] md:text-xs text-slate-500">View and export detailed history for a specific buyer</p>
               </div>
             </div>
             <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -1176,24 +1221,31 @@ export default function App() {
         <AnimatePresence>
           {selectedStatementBuyer && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="mb-8 space-y-6">
-              <div className="glass-card p-8 rounded-3xl relative overflow-hidden print:bg-white print:text-black print:border-none print:shadow-none">
-                <div className="hidden print:block mb-8 border-b-2 border-slate-200 pb-6">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h1 className="text-3xl font-black uppercase tracking-tighter">inventory & Billing soft</h1>
-                      <p className="text-sm text-slate-600">Generated on: {new Date().toLocaleDateString()}</p>
+              <div className="glass-card p-8 rounded-3xl relative overflow-hidden print:bg-white print:text-black print:border-none print:shadow-none print:p-0">
+                {/* PDF/Print Header with Logo */}
+                <div className="hidden print:block mb-10 border-b-4 border-indigo-600 pb-8">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-4">
+                      <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-xl">
+                        <Factory className="w-10 h-10" />
+                      </div>
+                      <div>
+                        <h1 className="text-4xl font-black uppercase tracking-tighter text-indigo-950">PRO FABRIC ELITE</h1>
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-[0.3em]">Inventory & Billing Solutions</p>
+                      </div>
                     </div>
                     <div className="text-right">
-                      <h2 className="text-xl font-bold">{manager.name}</h2>
-                      <p className="text-xs text-slate-500">System Manager</p>
+                      <p className="text-sm font-bold text-indigo-600 uppercase tracking-widest mb-1">Statement Summary</p>
+                      <p className="text-xs text-slate-500 font-mono">Date: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                      <p className="text-xs text-slate-500 font-mono">Time: {new Date().toLocaleTimeString()}</p>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 print:mb-6">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 print:mb-10">
                   <div>
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 print:text-slate-600">Statement For</p>
-                    <h2 className="text-4xl font-black tracking-tighter print:text-black">{selectedStatementBuyer}</h2>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 print:text-indigo-600 print:mb-2">Statement For Client</p>
+                    <h2 className="text-4xl font-black tracking-tighter print:text-5xl print:text-indigo-950">{selectedStatementBuyer}</h2>
                   </div>
                   <div className="flex gap-2 print:hidden">
                     <button onClick={() => exportBuyerCSV(selectedStatementBuyer)} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all border border-white/5">
@@ -1208,22 +1260,26 @@ export default function App() {
                 {(() => {
                   const { summary } = getBuyerStatementData(selectedStatementBuyer);
                   return (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8 print:grid-cols-4 print:gap-2">
-                      <div className="bg-slate-800/50 p-4 rounded-2xl print:bg-slate-100 print:border print:border-slate-200">
-                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1">Received</p>
-                        <p className="text-xl font-black print:text-black">{summary.received.toLocaleString()} Yds</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-8 print:grid-cols-5 print:gap-4 print:mb-12">
+                      <div className="bg-slate-800/50 p-4 rounded-2xl print:bg-white print:border-2 print:border-slate-100 print:shadow-sm">
+                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 print:text-indigo-600">Received</p>
+                        <p className="text-xl font-black print:text-2xl print:text-indigo-950">{summary.received.toLocaleString()} Yds</p>
                       </div>
-                      <div className="bg-slate-800/50 p-4 rounded-2xl print:bg-slate-100 print:border print:border-slate-200">
-                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1">Delivered</p>
-                        <p className="text-xl font-black print:text-black">{summary.ordered.toLocaleString()} Yds</p>
+                      <div className="bg-slate-800/50 p-4 rounded-2xl print:bg-white print:border-2 print:border-slate-100 print:shadow-sm">
+                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 print:text-indigo-600">Ordered</p>
+                        <p className="text-xl font-black print:text-2xl print:text-indigo-950">{summary.ordered.toLocaleString()} Yds</p>
                       </div>
-                      <div className="bg-slate-800/50 p-4 rounded-2xl print:bg-slate-100 print:border print:border-slate-200">
-                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1">Total Bill</p>
-                        <p className="text-xl font-black print:text-black">৳ {summary.bill.toLocaleString()}</p>
+                      <div className="bg-slate-800/50 p-4 rounded-2xl print:bg-white print:border-2 print:border-indigo-50 print:shadow-sm">
+                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 print:text-indigo-600">Actual Delv.</p>
+                        <p className="text-xl font-black print:text-2xl print:text-indigo-950">{(summary.actualDelivered).toLocaleString()} Yds</p>
                       </div>
-                      <div className="bg-slate-800/50 p-4 rounded-2xl print:bg-slate-100 print:border print:border-slate-200">
-                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1">Balance Due</p>
-                        <p className={cn("text-xl font-black", summary.bill - summary.paid > 0 ? "text-rose-400 print:text-rose-600" : "text-emerald-400 print:text-emerald-600")}>
+                      <div className="bg-slate-800/50 p-4 rounded-2xl print:bg-white print:border-2 print:border-slate-100 print:shadow-sm">
+                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 print:text-indigo-600">Total Bill</p>
+                        <p className="text-xl font-black print:text-2xl print:text-indigo-950">৳ {summary.bill.toLocaleString()}</p>
+                      </div>
+                      <div className="bg-slate-800/50 p-4 rounded-2xl print:bg-white print:border-2 print:border-rose-50 print:shadow-sm">
+                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 print:text-rose-600">Balance Due</p>
+                        <p className={cn("text-xl font-black print:text-2xl", summary.bill - summary.paid > 0 ? "text-rose-400 print:text-rose-600" : "text-emerald-400 print:text-emerald-600")}>
                           ৳ {(summary.bill - summary.paid).toLocaleString()}
                         </p>
                       </div>
@@ -1234,46 +1290,80 @@ export default function App() {
                 <div className="overflow-x-auto print:overflow-visible">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-slate-800/30 text-[11px] font-bold text-slate-400 uppercase tracking-widest print:bg-slate-100 print:text-slate-600">
-                        <th className="px-4 py-3">Date</th>
-                        <th className="px-4 py-3">Type</th>
-                        <th className="px-4 py-3">Fabric / Category</th>
-                        <th className="px-4 py-3">Ref</th>
-                        <th className="px-4 py-3 text-right">Recv</th>
-                        <th className="px-4 py-3 text-right">Order</th>
-                        <th className="px-4 py-3 text-right">Bill</th>
-                        <th className="px-4 py-3 text-right">Paid</th>
+                      <tr className="bg-slate-800/30 text-[11px] font-bold text-slate-400 uppercase tracking-widest print:bg-indigo-600 print:text-white">
+                        <th className="px-4 py-4 print:rounded-l-xl">Date</th>
+                        <th className="px-4 py-4">Type</th>
+                        <th className="px-4 py-4">Fabric / Category</th>
+                        <th className="px-4 py-4">Ref</th>
+                        <th className="px-4 py-4 text-right">Recv</th>
+                        <th className="px-4 py-4 text-right">Order</th>
+                        <th className="px-4 py-4 text-right">Actual Delv</th>
+                        <th className="px-4 py-4 text-right">Bill</th>
+                        <th className="px-4 py-4 text-right print:rounded-r-xl">Paid</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5 print:divide-slate-200">
-                      {getBuyerStatementData(selectedStatementBuyer).transactions.map(t => (
-                        <tr key={t.id} className="text-xs print:text-black">
-                          <td className="px-4 py-3 font-mono">{t.date}</td>
-                          <td className="px-4 py-3 capitalize">{t.type}</td>
-                          <td className="px-4 py-3">
+                      {getBuyerStatementData(selectedStatementBuyer).transactions.map((t, idx) => (
+                        <tr key={t.id} className={cn(
+                          "text-xs transition-colors",
+                          idx % 2 === 0 ? "bg-white/[0.02] print:bg-slate-50/50" : "bg-transparent print:bg-white",
+                          "print:text-indigo-950"
+                        )}>
+                          <td className="px-4 py-4 font-mono">{t.date}</td>
+                          <td className="px-4 py-4">
+                            <span className={cn(
+                              "px-2 py-1 rounded-full text-[10px] font-bold uppercase",
+                              t.type === 'receive' ? "bg-blue-500/10 text-blue-400 print:text-blue-600" : 
+                              t.type === 'delivery' ? "bg-indigo-500/10 text-indigo-400 print:text-indigo-600" : 
+                              "bg-emerald-500/10 text-emerald-400 print:text-emerald-600"
+                            )}>
+                              {t.type}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4">
                             <div className="flex flex-col">
-                              <span className="font-bold text-emerald-400 print:text-emerald-700">{t.fabricName}</span>
+                              <span className="font-bold text-slate-200 print:text-indigo-950">{t.fabricName}</span>
                               <span className="text-[9px] text-slate-500 uppercase">{t.pkgType}</span>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-slate-400 print:text-slate-600">{t.challan}</td>
-                          <td className="px-4 py-3 text-right text-blue-400 print:text-blue-600">{t.receiveQty > 0 ? t.receiveQty : '-'}</td>
-                          <td className="px-4 py-3 text-right text-rose-400 print:text-rose-600">{t.orderQty > 0 ? t.orderQty : '-'}</td>
-                          <td className="px-4 py-3 text-right font-bold">৳ {t.bill > 0 ? t.bill.toLocaleString() : '-'}</td>
-                          <td className="px-4 py-3 text-right text-emerald-400 print:text-emerald-600">৳ {t.paid > 0 ? t.paid.toLocaleString() : '-'}</td>
+                          <td className="px-4 py-4 text-slate-400 print:text-slate-600">{t.challan}</td>
+                          <td className="px-4 py-4 text-right font-mono text-blue-400 print:text-blue-600">{t.receiveQty > 0 ? t.receiveQty.toLocaleString() : '-'}</td>
+                          <td className="px-4 py-4 text-right font-mono text-indigo-400 print:text-indigo-600">{t.orderQty > 0 ? t.orderQty.toLocaleString() : '-'}</td>
+                          <td className="px-4 py-4 text-right font-mono text-indigo-400 print:text-indigo-800 font-bold">{(t.delvA + t.delvB) > 0 ? (t.delvA + t.delvB).toLocaleString() : '-'}</td>
+                          <td className="px-4 py-4 text-right font-mono text-slate-200 print:text-indigo-950">৳ {t.bill.toLocaleString()}</td>
+                          <td className="px-4 py-4 text-right font-mono text-emerald-400 print:text-emerald-600">৳ {t.paid.toLocaleString()}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+
+                {/* Print Footer */}
+                <div className="hidden print:flex justify-between items-end mt-20 pt-10 border-t border-slate-200">
+                  <div className="space-y-4">
+                    <div className="w-40 h-px bg-slate-400" />
+                    <p className="text-xs font-bold text-slate-600 uppercase tracking-widest">Client Signature</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-slate-400 italic mb-2">This is a computer generated statement</p>
+                    <div className="flex items-center gap-2 justify-center">
+                      <div className="w-2 h-2 rounded-full bg-indigo-600" />
+                      <p className="text-xs font-black text-indigo-950">PRO FABRIC ELITE</p>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="w-40 h-px bg-slate-400" />
+                    <p className="text-xs font-bold text-slate-600 uppercase tracking-widest">Authorized Signature</p>
+                  </div>
                 </div>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 mb-8 print:hidden">
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 mb-8 print:hidden" id="new-entry-section">
           <div className="xl:col-span-5 glass-card p-6 rounded-3xl">
-            <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><PlusCircle className="w-5 h-5 text-indigo-500" /> {editingId ? 'Edit Entry' : 'New Transaction'}</h3>
+            <h3 className="text-xl md:text-lg font-bold mb-6 flex items-center gap-2"><PlusCircle className="w-5 h-5 text-indigo-500" /> {editingId ? 'Edit Entry' : 'New Transaction'}</h3>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -1460,8 +1550,8 @@ export default function App() {
               {/* Financial Summary Preview */}
               {(parseFloat(formData.amount) > 0 || parseFloat(formData.orderQty) > 0 || parseFloat(formData.billEntry) > 0 || parseFloat(formData.paidEntry) > 0) && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-4 bg-slate-800/50 rounded-2xl border border-slate-700/50 space-y-2">
-                  <div className="flex justify-between items-center text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                    <span>Transaction Summary</span>
+                  <div className="flex justify-between items-center text-[11px] md:text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <span className="text-xs md:text-[11px]">Transaction Summary</span>
                     <span className="text-indigo-400">Preview</span>
                   </div>
                   <div className="space-y-1">
@@ -1540,8 +1630,8 @@ export default function App() {
                   <FileText className="w-5 h-5 text-indigo-400" />
                 </div>
                 <div>
-                  <h3 className={cn("text-xl font-black tracking-tight", headingColor)}>Transaction Ledger</h3>
-                  <p className={cn("text-[10px] font-bold uppercase tracking-[0.1em] mt-0.5", mutedText)}>Detailed Operations History</p>
+                  <h3 className={cn("text-2xl md:text-xl font-black tracking-tight", headingColor)}>Transaction Ledger</h3>
+                  <p className={cn("text-[10px] md:text-[10px] font-bold uppercase tracking-[0.1em] mt-0.5", mutedText)}>Detailed Operations History</p>
                 </div>
               </div>
               <div className="relative w-full sm:w-64">
@@ -1550,7 +1640,16 @@ export default function App() {
               </div>
             </div>
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="space-y-1.5">
+                <label className={cn("text-[11px] font-bold uppercase tracking-wide", mutedText)}>Month</label>
+                <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className={cn("w-full border-none rounded-xl px-4 py-2 text-xs focus:ring-2 focus:ring-indigo-500", theme === 'dark' ? "bg-slate-800/50 text-white" : "bg-slate-100 text-slate-900")}>
+                  <option value="all">All Months</option>
+                  {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
               <div className="space-y-1.5">
                 <label className={cn("text-[11px] font-bold uppercase tracking-wide", mutedText)}>Start Date</label>
                 <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className={cn("w-full border-none rounded-xl px-4 py-2 text-xs focus:ring-2 focus:ring-indigo-500", theme === 'dark' ? "bg-slate-800/50 text-white" : "bg-slate-100 text-slate-900")} />
@@ -1577,6 +1676,33 @@ export default function App() {
                 </select>
               </div>
             </div>
+
+            {/* Filtered Summary Results */}
+            <div className={cn(
+              "grid grid-cols-2 md:grid-cols-5 gap-3 p-4 rounded-2xl border",
+              theme === 'dark' ? "bg-white/[0.02] border-white/5" : "bg-slate-50 border-slate-200"
+            )}>
+              <div className="flex flex-col">
+                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Total Received</span>
+                <span className="text-sm font-black text-blue-400">{filteredStats.received.toLocaleString()} Yds</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Total Ordered</span>
+                <span className="text-sm font-black text-rose-400">{filteredStats.ordered.toLocaleString()} Yds</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Actual Delivered</span>
+                <span className="text-sm font-black text-indigo-400">{filteredStats.actualDelivered.toLocaleString()} Yds</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Total Bill</span>
+                <span className="text-sm font-black text-indigo-400">৳ {filteredStats.bill.toLocaleString()}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Total Paid</span>
+                <span className="text-sm font-black text-emerald-400">৳ {filteredStats.paid.toLocaleString()}</span>
+              </div>
+            </div>
           </div>
           <div className="overflow-x-auto custom-scrollbar">
             <table className="w-full text-left border-collapse">
@@ -1593,13 +1719,16 @@ export default function App() {
                 </tr>
               </thead>
               <tbody className={cn("divide-y", theme === 'dark' ? "divide-white/5" : "divide-slate-200")}>
-                {sortedTransactions.map(t => {
+                {sortedTransactions.map((t, index) => {
                   const due = t.bill - t.paid;
                   return (
                     <tr key={t.id} className={cn(
                       "group transition-all duration-300 border-b last:border-0", 
-                      theme === 'dark' ? "hover:bg-white/[0.03] border-white/5" : "hover:bg-slate-50 border-slate-100",
-                      due > 0 && (theme === 'dark' ? "bg-rose-500/[0.02]" : "bg-rose-500/[0.01]")
+                      theme === 'dark' 
+                        ? (index % 2 === 0 ? "bg-white/[0.02]" : "bg-transparent") 
+                        : (index % 2 === 0 ? "bg-slate-50/50" : "bg-white"),
+                      theme === 'dark' ? "hover:bg-white/[0.05] border-white/5" : "hover:bg-slate-100 border-slate-100",
+                      due > 0 && (theme === 'dark' ? "bg-rose-500/[0.04]" : "bg-rose-500/[0.02]")
                     )}>
                       <td className="px-6 py-5">
                         <div className="flex flex-col">
@@ -1621,7 +1750,12 @@ export default function App() {
                       </td>
                       <td className="px-6 py-4 text-center">
                         {t.type === 'receive' && <span className="text-blue-400 font-bold">+{t.receiveQty} Yds</span>}
-                        {t.type === 'delivery' && <div className="flex flex-col items-center"><span className="text-rose-400 font-bold">-{t.orderQty} Yds</span><span className="text-[9px] text-slate-500">Delv: {t.delvA + t.delvB}</span></div>}
+                        {t.type === 'delivery' && (
+                          <div className="flex flex-col items-center gap-1">
+                            <span className="text-rose-400 font-bold text-xs">Ord: {t.orderQty}</span>
+                            <span className="text-indigo-400 font-black text-sm">Delv: {t.delvA + t.delvB}</span>
+                          </div>
+                        )}
                         {t.type === 'bill' && <span className="text-slate-600">—</span>}
                       </td>
                       <td className="px-6 py-4">
@@ -1780,29 +1914,66 @@ function NavItem({ icon, label, active = false, onClick, theme = 'dark' }: { ico
 
 function StatCard({ label, value, unit, icon, color, theme = 'dark' }: { label: string, value: string, unit: string, icon: React.ReactNode, color: 'blue' | 'rose' | 'emerald' | 'amber', theme?: 'dark' | 'light' }) {
   const colors = {
-    blue: { border: "border-l-blue-500", bg: "from-blue-500/10 to-transparent", icon: "text-blue-400", glow: "group-hover:shadow-blue-500/10" },
-    rose: { border: "border-l-rose-500", bg: "from-rose-500/10 to-transparent", icon: "text-rose-400", glow: "group-hover:shadow-rose-500/10" },
-    emerald: { border: "border-l-emerald-500", bg: "from-emerald-500/10 to-transparent", icon: "text-emerald-400", glow: "group-hover:shadow-emerald-500/10" },
-    amber: { border: "border-l-amber-500", bg: "from-amber-500/10 to-transparent", icon: "text-amber-400", glow: "group-hover:shadow-amber-500/10" },
+    blue: { border: "border-l-blue-500", bg: "from-blue-500/20 to-transparent", icon: "text-blue-400", glow: "group-hover:shadow-blue-500/20", shadow: "shadow-blue-900/20" },
+    rose: { border: "border-l-rose-500", bg: "from-rose-500/20 to-transparent", icon: "text-rose-400", glow: "group-hover:shadow-rose-500/20", shadow: "shadow-rose-900/20" },
+    emerald: { border: "border-l-emerald-500", bg: "from-emerald-500/20 to-transparent", icon: "text-emerald-400", glow: "group-hover:shadow-emerald-500/20", shadow: "shadow-emerald-900/20" },
+    amber: { border: "border-l-amber-500", bg: "from-amber-500/20 to-transparent", icon: "text-amber-400", glow: "group-hover:shadow-amber-500/20", shadow: "shadow-amber-900/20" },
   };
+  
   return (
-    <div className={cn(
-      "glass-card p-6 rounded-[2rem] border-l-4 transition-all duration-500 group relative overflow-hidden", 
-      colors[color].border, 
-      colors[color].glow,
-      theme === 'dark' ? "bg-slate-900/50" : "bg-white shadow-sm border-slate-200"
-    )}>
-      <div className={cn("absolute inset-0 bg-gradient-to-br opacity-0 group-hover:opacity-100 transition-opacity duration-500", colors[color].bg)} />
+    <motion.div 
+      whileHover={{ y: -8, scale: 1.02 }}
+      transition={{ type: "spring", stiffness: 400, damping: 10 }}
+      className={cn(
+        "glass-card p-5 md:p-7 rounded-[2rem] border-l-4 transition-all duration-500 group relative overflow-hidden shadow-2xl", 
+        colors[color].border, 
+        colors[color].glow,
+        colors[color].shadow,
+        theme === 'dark' ? "bg-slate-900/80 backdrop-blur-xl border-white/5" : "bg-white shadow-xl border-slate-200"
+      )}
+    >
+      {/* 3D Inner Glow Effect */}
+      <div className={cn("absolute inset-0 bg-gradient-to-br opacity-0 group-hover:opacity-100 transition-opacity duration-700", colors[color].bg)} />
+      <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/5 rounded-full blur-3xl group-hover:bg-white/10 transition-all duration-700" />
+      
       <div className="relative z-10">
-        <div className="flex justify-between items-start mb-4">
-          <p className={cn("text-[10px] font-bold uppercase tracking-[0.2em]", theme === 'dark' ? "text-slate-500" : "text-slate-400")}>{label}</p>
-          <div className={cn("p-2 rounded-xl transition-all duration-500", theme === 'dark' ? "bg-white/5" : "bg-slate-100", colors[color].icon)}>{icon}</div>
+        <div className="flex justify-between items-start mb-4 md:mb-6">
+          <div className="space-y-1">
+            <p className={cn("text-xs md:text-sm font-black uppercase tracking-[0.2em]", theme === 'dark' ? "text-slate-300" : "text-slate-600")}>
+              {label}
+            </p>
+            <div className={cn("h-1 w-12 rounded-full bg-gradient-to-r from-transparent via-indigo-500 to-transparent opacity-50", colors[color].icon)} />
+          </div>
+          <div className={cn(
+            "p-2.5 md:p-3 rounded-2xl transition-all duration-500 shadow-lg transform group-hover:rotate-12", 
+            theme === 'dark' ? "bg-slate-800/50 border border-white/10" : "bg-slate-100 border border-slate-200", 
+            colors[color].icon
+          )}>
+            {icon}
+          </div>
         </div>
+        
         <div className="flex items-baseline gap-2">
-          <h3 className={cn("text-3xl font-black tracking-tighter", theme === 'dark' ? "text-white" : "text-slate-900")}>{value}</h3>
-          <span className={cn("text-xs font-bold uppercase", theme === 'dark' ? "text-slate-500" : "text-slate-400")}>{unit}</span>
+          <h3 className={cn(
+            "text-2xl md:text-4xl font-black tracking-tighter drop-shadow-sm", 
+            theme === 'dark' ? "text-white" : "text-slate-900"
+          )}>
+            {value}
+          </h3>
+          <span className={cn(
+            "text-[10px] md:text-sm font-black uppercase tracking-widest", 
+            theme === 'dark' ? "text-slate-500" : "text-slate-400"
+          )}>
+            {unit}
+          </span>
         </div>
+        
+        {/* Bottom Decorative Line */}
+        <div className={cn(
+          "mt-4 h-[1px] w-full bg-gradient-to-r from-transparent via-white/5 to-transparent",
+          theme === 'dark' ? "via-white/5" : "via-slate-200"
+        )} />
       </div>
-    </div>
+    </motion.div>
   );
 }
